@@ -48,4 +48,4 @@ P33000 Иванов Иван Иванович
 
 ## Ресурсы
 
-- [Шаблон проекта монолитного приложения на `C++` и `CMake`](https://github.com/vityaman-edu/cpp-monolith-template)
+- [Шаблон проекта монолитного приложения на `C++` и `CMake`](https://github.com/secs-dev/cpp-monolith-template)
