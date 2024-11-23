@@ -9,3 +9,4 @@ all:
 
 clean:
 	make -C $(KDIR) M=$(PWD) clean
+	rm -rf .cache
