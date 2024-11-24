@@ -19,5 +19,5 @@ static void __exit vtfs_exit(void) {
   LOG("VT Mute!\n");
 }
 
-module_init(vtfs_init);  // NOLINT
-module_exit(vtfs_exit);  // NOLINT
+module_init(vtfs_init);
+module_exit(vtfs_exit);
