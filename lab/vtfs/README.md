@@ -50,7 +50,7 @@ sudo insmod source/vtfs.ko
 ```sh
 $ dmesg
 <...>
-[ 123.456789] VT Flood!
+[ 123.456789] VTFS joined the kernel
 ```
 
 Для выгрузки модуля нам понадобится команда `rmmod`.
@@ -59,7 +59,7 @@ $ dmesg
 $ sudo rmmod vtfs
 $ dmesg
 <...>
-[ 123.987654] VT Mute!
+[ 123.987654] VTFS left the kernel
 ```
 
 ## Часть 2. Подготовка файловой системы
