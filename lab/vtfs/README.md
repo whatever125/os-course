@@ -11,10 +11,10 @@
 
 ## Вспомогательные материалы
 
-- [The Linux Kernel Module Programming Guide][26]
-- [A simple native file system for Linux kernel][27]
-- [Linux Kernel Development, 3rd Edition][28]
-- [Understanding the Linux Kernel: From I/O Ports to Process Management 3rd Edition][29]
+- [The Linux Kernel Module Programming Guide][26] – справочный материал по разработке модулей ядра Linux.
+- [A simple native file system for Linux kernel][27] – пример реализации модуля для создания простой файловой системы от автора книги «The Linux Kernel Module Programming Guide».
+- [Linux Kernel Development, 3rd Edition][28] – книга с описанием устройства виртуальных файловых систем в Linux, глава 13.
+- [Understanding the Linux Kernel: From I/O Ports to Process Management 3rd Edition][29] – книга с описанием работы и структур виртуальных файловых систем в Linux, глава 12.
 
 ## Часть 1. Знакомство с простым модулем
 
