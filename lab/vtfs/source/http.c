@@ -127,7 +127,7 @@ int64_t parse_http_response(char *raw_response, size_t raw_response_size,
   return return_value;
 }
 
-int64_t networkfs_http_call(const char *token, const char *method,
+int64_t vtfs_http_call(const char *token, const char *method,
                             char *response_buffer, size_t buffer_size,
                             size_t arg_size, ...) {
   struct socket *sock;
