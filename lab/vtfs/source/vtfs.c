@@ -12,9 +12,13 @@ MODULE_DESCRIPTION("A simple FS kernel module");
 
 #define LOG(fmt, ...) pr_info("[" MODULE_NAME "]: " fmt, ##__VA_ARGS__)
 
+static int mask = 0;
+
+struct inode* vtfs_get_inode(struct super_block*, const struct inode*, umode_t, int);
+
 struct dentry* vtfs_lookup(
-  struct inode* parent_inode, 
-  struct dentry* child_dentry, 
+  struct inode* parent_inode,
+  struct dentry* child_dentry,
   unsigned int flag
 ) {
   ino_t root = parent_inode->i_ino;
@@ -29,11 +33,52 @@ struct dentry* vtfs_lookup(
   return NULL;
 }
 
+int vtfs_create(
+  struct inode *parent_inode,
+  struct dentry *child_dentry,
+  umode_t mode,
+  bool b
+) {
+  ino_t root = parent_inode->i_ino;
+  const char *name = child_dentry->d_name.name;
+  if (root == 100 && !strcmp(name, "test.txt")) {
+    struct inode *inode = vtfs_get_inode(
+        parent_inode->i_sb, NULL, S_IFREG | S_IRWXUGO, 101);
+    d_add(child_dentry, inode);
+    mask |= 1;
+  } else if (root == 100 && !strcmp(name, "new_file.txt")) {
+    struct inode *inode = vtfs_get_inode(
+        parent_inode->i_sb, NULL, S_IFREG | S_IRWXUGO, 102);
+    d_add(child_dentry, inode);
+    mask |= 2;
+  }
+  return 0;
+}
+
+int vtfs_unlink(
+  struct inode *parent_inode,
+  struct dentry *child_dentry
+) {
+  const char *name = child_dentry->d_name.name;
+  ino_t root = parent_inode->i_ino;
+  if (root == 100 && !strcmp(name, "test.txt")) {
+    mask &= ~1;
+  } else if (root == 100 && !strcmp(name, "new_file.txt")) {
+    mask &= ~2;
+  }
+  return 0;
+}
+
 struct inode_operations vtfs_inode_ops = {
   .lookup = vtfs_lookup,
+  .create = vtfs_create,
+  .unlink = vtfs_unlink,
 };
 
-int vtfs_iterate(struct file* filp, struct dir_context* ctx) {
+int vtfs_iterate(
+  struct file* filp,
+  struct dir_context* ctx
+) {
   char fsname[10];
   struct dentry* dentry = filp->f_path.dentry;
   struct inode* inode   = dentry->d_inode;
@@ -69,9 +114,9 @@ struct file_operations vtfs_dir_ops = {
 };
 
 struct inode* vtfs_get_inode(
-  struct super_block* sb, 
-  const struct inode* dir, 
-  umode_t mode, 
+  struct super_block* sb,
+  const struct inode* dir,
+  umode_t mode,
   int i_ino
 ) {
   struct inode *inode = new_inode(sb);
@@ -84,7 +129,11 @@ struct inode* vtfs_get_inode(
   return inode;
 }
 
-int vtfs_fill_super(struct super_block *sb, void *data, int silent) {
+int vtfs_fill_super(
+  struct super_block *sb,
+  void *data,
+  int silent
+) {
   struct inode* inode = vtfs_get_inode(sb, NULL, S_IFDIR | 0777, 1000);
   sb->s_root = d_make_root(inode);
   if (sb->s_root == NULL) {
