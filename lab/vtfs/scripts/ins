@@ -1,0 +1,3 @@
+cd ~/os-course/lab/vtfs
+sudo insmod ./source/vtfs.ko
+sudo mount -t vtfs "TODO" /mnt/vt
