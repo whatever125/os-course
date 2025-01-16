@@ -137,10 +137,92 @@ int vtfs_unlink(
   return -ENOENT;
 }
 
+int vtfs_mkdir(
+  struct inode *parent_inode,
+  struct dentry *child_dentry,
+  umode_t mode
+) {
+  struct inode *inode;
+  struct vtfs_dentry *vtfs_dentry;
+  struct vtfs_inode *vtfs_inode;
+  
+  inode = vtfs_get_inode(parent_inode->i_sb, parent_inode, mode | S_IFDIR, next_ino++);
+  if (!inode) {
+    return -ENOMEM;
+  }
+
+  vtfs_dentry = kmalloc(sizeof(struct vtfs_dentry), GFP_KERNEL);
+  if (!vtfs_dentry) {
+    iput(inode);
+    return -ENOMEM;
+  }
+
+  vtfs_inode = kmalloc(sizeof(struct vtfs_inode), GFP_KERNEL);
+  if (!vtfs_inode) {
+    kfree(vtfs_dentry);
+    iput(inode);
+    return -ENOMEM;
+  }
+
+  vtfs_inode->i_ino = inode->i_ino;
+  vtfs_inode->i_mode = inode->i_mode;
+  vtfs_inode->i_size = 0;
+
+  vtfs_dentry->d_dentry = child_dentry;
+  strcpy(vtfs_dentry->d_name, child_dentry->d_name.name);
+  vtfs_dentry->d_parent_ino = parent_inode->i_ino;
+  vtfs_dentry->d_inode = vtfs_inode;
+
+  if (vtfs_dentry->d_parent_ino == vtfs_dentry->d_inode->i_ino) {
+    kfree(vtfs_inode);
+    kfree(vtfs_dentry);
+    iput(inode);
+    return -EFAULT;
+  }
+
+  list_add(&vtfs_dentry->d_list, &vtfs_sb.s_dentries);
+  d_add(child_dentry, inode);
+
+  return 0;
+}
+
+int vtfs_rmdir(
+  struct inode *parent_inode,
+  struct dentry *child_dentry
+) {
+  struct vtfs_dentry *dentry;
+  ino_t root;
+  const char *name;
+
+  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
+    if (dentry->d_parent_ino == child_dentry->d_inode->i_ino) {
+      return -ENOTEMPTY;
+    }
+  }
+
+  root = parent_inode->i_ino;
+  name = child_dentry->d_name.name;
+
+  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
+    if (dentry->d_parent_ino == root && strcmp(dentry->d_name, name) == 0) {
+      list_del(&dentry->d_list);
+      kfree(dentry->d_inode);
+      kfree(dentry);
+      drop_nlink(child_dentry->d_inode);
+      d_drop(child_dentry);
+      return 0;
+    }
+  }
+
+  return -ENOENT;
+}
+
 struct inode_operations vtfs_inode_ops = {
   .lookup = vtfs_lookup,
   .create = vtfs_create,
   .unlink = vtfs_unlink,
+  .mkdir  = vtfs_mkdir,
+  .rmdir  = vtfs_rmdir,
 };
 
 // FILE OPERATIONS
