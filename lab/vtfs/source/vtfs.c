@@ -265,8 +265,83 @@ int vtfs_iterate(
   return ctx->pos;
 }
 
+ssize_t vtfs_read(
+  struct file *file,
+  char *buffer,
+  size_t len,
+  loff_t *offset
+) {
+  struct vtfs_dentry *dentry;
+  struct inode *file_inode;
+  size_t max_len;
+
+  if (!file || !buffer || !offset || *offset < 0) {
+    return -EINVAL;
+  }
+
+  file_inode = file->f_path.dentry->d_inode;
+
+  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
+    if (dentry->d_inode->i_ino == file_inode->i_ino) {
+      if (*offset >= dentry->d_inode->i_size){
+        return 0;
+      }
+      max_len = dentry->d_inode->i_size - *offset;
+      if (len > max_len) {
+        len = max_len;
+      }
+      if (copy_to_user(buffer, dentry->d_inode->i_data + *offset, len) != 0) {
+        return -EFAULT;
+      }
+      *offset += len;
+      return len;
+    }
+  }
+  return -ENOENT;
+}
+
+ssize_t vtfs_write(
+  struct file *file,
+  const char *buffer,
+  size_t len,
+  loff_t *offset
+) {
+  struct vtfs_dentry *dentry;
+  struct inode *file_inode;
+  size_t max_len;
+
+  if (!file || !buffer || !offset || *offset < 0) {
+    return -EINVAL;
+  }
+
+  file_inode = file->f_path.dentry->d_inode;
+
+  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
+    if (dentry->d_inode->i_ino == file_inode->i_ino) {
+      if (*offset >= MAX_FILE_SIZE) {
+        return -ENOSPC;
+      }
+      max_len = MAX_FILE_SIZE - *offset;
+      if (len > max_len) {
+        len = max_len;
+      }
+      if (copy_from_user(dentry->d_inode->i_data + *offset, buffer, len) != 0) {
+        return -EFAULT;
+      }
+      *offset += len;
+      if (*offset > dentry->d_inode->i_size) {
+        dentry->d_inode->i_size = *offset;
+      }
+      return len;
+    }
+  }
+  return -ENOENT;
+}
+
 struct file_operations vtfs_dir_ops = {
   .iterate = vtfs_iterate,
+  .read = vtfs_read,
+  .write = vtfs_write,
 };
 
 // VFS OPERATIONS
