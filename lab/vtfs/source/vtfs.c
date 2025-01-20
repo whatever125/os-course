@@ -17,7 +17,7 @@ MODULE_DESCRIPTION("A simple FS kernel module");
 #define MAX_DENTRY_NAME_LEN   128
 #define ROOT_INO              1000
 
-static unsigned long next_ino = ROOT_INO;
+unsigned long next_ino = ROOT_INO;
 
 // VTFS STRUCTURES
 
@@ -126,10 +126,12 @@ int vtfs_unlink(
 
   list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
     if (dentry->d_parent_ino == root && strcmp(dentry->d_name, name) == 0) {
-      list_del(&dentry->d_list);
-      kfree(dentry->d_inode);
-      kfree(dentry);
       drop_nlink(child_dentry->d_inode);
+      if (child_dentry->d_inode->i_nlink == 0) {
+        kfree(dentry->d_inode);
+      }
+      list_del(&dentry->d_list);
+      kfree(dentry);
       d_drop(child_dentry);
       return 0;
     }
@@ -182,6 +184,7 @@ int vtfs_mkdir(
 
   list_add(&vtfs_dentry->d_list, &vtfs_sb.s_dentries);
   d_add(child_dentry, inode);
+  inc_nlink(parent_inode);
 
   return 0;
 }
@@ -209,6 +212,7 @@ int vtfs_rmdir(
       kfree(dentry->d_inode);
       kfree(dentry);
       drop_nlink(child_dentry->d_inode);
+      drop_nlink(parent_inode);
       d_drop(child_dentry);
       return 0;
     }
@@ -321,6 +325,10 @@ ssize_t vtfs_write(
       if (*offset >= MAX_FILE_SIZE) {
         return -ENOSPC;
       }
+      if (*offset == 0) {
+        dentry->d_inode->i_size = 0;
+        memset(dentry->d_inode->i_data, 0, MAX_FILE_SIZE);
+      }
       max_len = MAX_FILE_SIZE - *offset;
       if (len > max_len) {
         len = max_len;
@@ -340,8 +348,8 @@ ssize_t vtfs_write(
 
 struct file_operations vtfs_dir_ops = {
   .iterate = vtfs_iterate,
-  .read = vtfs_read,
-  .write = vtfs_write,
+  .read    = vtfs_read,
+  .write   = vtfs_write,
 };
 
 // VFS OPERATIONS
@@ -360,8 +368,9 @@ struct inode* vtfs_get_inode(
   inode->i_ino = i_ino;
   inode->i_op = &vtfs_inode_ops;
   inode->i_fop = &vtfs_dir_ops;
-  if (!S_ISDIR(mode))
-    clear_nlink(inode);
+  if (S_ISDIR(mode)) {
+    inc_nlink(inode);
+  }
   return inode;
 }
 
@@ -370,7 +379,7 @@ int vtfs_fill_super(
   void *data,
   int silent
 ) {
-  struct inode* inode = vtfs_get_inode(sb, NULL, S_IFDIR | S_IRWXUGO, ROOT_INO);
+  struct inode* inode = vtfs_get_inode(sb, NULL, S_IFDIR | S_IRWXUGO, next_ino++);
   if (!inode) {
     printk(KERN_ERR "Can't create root");
     return -ENOMEM;
