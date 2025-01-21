@@ -6,6 +6,7 @@ const int SERVER_PORT = 8080;
 // callee should call free_request on received buffer
 int fill_request(struct kvec *vec, const char *token, const char *method,
                  size_t arg_size, va_list args) {
+  int i;
   // 2048 bytes for URL and 64 bytes for anything else
   char *request_buffer = kzalloc(2048 + 64, GFP_KERNEL);
   if (request_buffer == 0) {
@@ -18,7 +19,7 @@ int fill_request(struct kvec *vec, const char *token, const char *method,
   strcat(request_buffer, "?token=");
   strcat(request_buffer, token);
 
-  for (int i = 0; i < arg_size; i++) {
+  for (i = 0; i < arg_size; i++) {
     strcat(request_buffer, "&");
     strcat(request_buffer, va_arg(args, char *));
     strcat(request_buffer, "=");
@@ -63,6 +64,8 @@ int64_t parse_http_response(char *raw_response, size_t raw_response_size,
                             char *response, size_t response_size) {
   char *buffer = raw_response;
 
+  printk(KERN_INFO "Raw response:\n%.*s\n", raw_response_size, raw_response);
+
   // Read Response Line
   {
     char *status_line = strsep(&buffer, "\r");
@@ -90,7 +93,7 @@ int64_t parse_http_response(char *raw_response, size_t raw_response_size,
       break;
     }
 
-    if (strncmp(header, "Content-Length: ", 16) == 0) {
+    if (strncmp(header, "content-length: ", 16) == 0) {
       int error = kstrtoint(header + 16, 0, &length);
       if (error != 0) {
         return -6;
@@ -144,8 +147,8 @@ int64_t vtfs_http_call(const char *token, const char *method,
 
   error = kernel_connect(sock, (struct sockaddr *)&s_addr,
                          sizeof(struct sockaddr_in), 0);
+  printk(KERN_INFO "kernel_connect error code %d\n", (int) error);
   if (error != 0) {
-
     sock_release(sock);
     return -2;
   }
@@ -154,6 +157,7 @@ int64_t vtfs_http_call(const char *token, const char *method,
   va_list args;
   va_start(args, arg_size);
   error = fill_request(&kvec, token, method, arg_size, args);
+  printk(KERN_INFO "fill_request error code %d\n", (int) error);
   va_end(args);
 
   if (error != 0) {
@@ -166,6 +170,7 @@ int64_t vtfs_http_call(const char *token, const char *method,
   memset(&msg, 0, sizeof(struct msghdr));
 
   error = kernel_sendmsg(sock, &msg, &kvec, 1, kvec.iov_len);
+  printk(KERN_INFO "kernel_sendmsg error code %d\n", (int) error);
   kfree(kvec.iov_base);
 
   if (error < 0) {
@@ -193,6 +198,7 @@ int64_t vtfs_http_call(const char *token, const char *method,
 
   error = parse_http_response(raw_response_buffer, read_bytes, response_buffer,
                               buffer_size);
+  printk(KERN_INFO "parse_http_response error code %d\n", (int) error);
 
   kfree(raw_response_buffer);
   return error;

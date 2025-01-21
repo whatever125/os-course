@@ -4,18 +4,12 @@
 #include <linux/module.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
-
-#define MODULE_NAME "vtfs"
+#include "vtfs.h"
+#include "http.c"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("secs-dev");
 MODULE_DESCRIPTION("A simple FS kernel module");
-
-#define LOG(fmt, ...) pr_info("[" MODULE_NAME "]: " fmt, ##__VA_ARGS__)
-
-#define MAX_FILE_SIZE         1024
-#define MAX_DENTRY_NAME_LEN   128
-#define ROOT_INO              1000
 
 unsigned long next_ino = ROOT_INO;
 
@@ -50,24 +44,40 @@ struct dentry* vtfs_lookup(
   struct dentry* child_dentry,
   unsigned int flag
 ) {
-  struct vtfs_dentry *dentry;
   struct inode *inode;
   ino_t root;
+  char root_str[INT_LEN];
   const char *name;
+  char name_enc[MAX_DENTRY_NAME_BYTE];
+  int64_t code;
+  struct lookup_response response;
 
   root = parent_inode->i_ino;
   name = child_dentry->d_name.name;
 
-  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
-    if (dentry->d_parent_ino == root && strcmp(dentry->d_name, name) == 0) {
-      inode = vtfs_get_inode(vtfs_sb.s_sb, parent_inode, dentry->d_inode->i_mode, dentry->d_inode->i_ino);
-      if (!inode) {
-        return ERR_PTR(-ENOMEM);
-      }
-      d_add(child_dentry, inode);
-      return NULL;
-    }
+  encode(name, name_enc);
+  snprintf(root_str, sizeof(root_str), "%u", (uint) root);
+
+  code = vtfs_http_call(
+    "TODO",
+    "lookup",
+    (void *)(&response),
+    sizeof(response),
+    2,
+    "name",
+    name_enc,
+    "parent_inode",
+    root_str
+  );
+
+  if (code != 0) {
+    printk(KERN_ERR "Lookup HTTP-call error code %lld\n", code);
+    return NULL;
   }
+  printk(KERN_INFO "Mode: %d\n", response.mode);
+  inode = vtfs_get_inode(vtfs_sb.s_sb, parent_inode, response.mode, response.inode);
+  d_add(child_dentry, inode);
+
   return NULL;
 }
 
@@ -79,9 +89,44 @@ int vtfs_create(
 ) {
   struct inode *inode;
   struct vtfs_dentry *vtfs_dentry;
-  struct vtfs_inode *vtfs_inode;
+  ino_t root;
+  char root_str[INT_LEN];
+  const char *name;
+  char name_enc[MAX_DENTRY_NAME_BYTE];
+  char mode_str[INT_LEN];
+  int64_t code;
+  struct create_response response;
+
+  name = child_dentry->d_name.name;
+  root = parent_inode->i_ino;
+  mode |= S_IFREG;
+  mode |= S_IRWXUGO;
+
+  encode(name, name_enc);
+  snprintf(root_str, sizeof(root_str), "%u", (uint) root);
+  snprintf(mode_str, sizeof(mode_str), "%u", (uint) mode);
+
+  printk(KERN_INFO "Mode: %s\n", mode_str);
+
+  code = vtfs_http_call(
+    "TODO",
+    "create",
+    (void *)(&response),
+    sizeof(response),
+    3,
+    "name",
+    name_enc,
+    "parent_inode",
+    root_str,
+    "mode",
+    mode_str
+  );
+  if (code != 0) {
+    printk(KERN_ERR "Create HTTP-call error code %lld\n", code);
+    return -code;
+  }
   
-  inode = vtfs_get_inode(parent_inode->i_sb, parent_inode, mode, next_ino++);
+  inode = vtfs_get_inode(parent_inode->i_sb, parent_inode, mode, response.inode);
   if (!inode) {
     return -ENOMEM;
   }
@@ -92,20 +137,9 @@ int vtfs_create(
     return -ENOMEM;
   }
 
-  vtfs_inode = kmalloc(sizeof(struct vtfs_inode), GFP_KERNEL);
-  if (!vtfs_inode) {
-    kfree(vtfs_dentry);
-    iput(inode);
-    return -ENOMEM;
-  }
-
   vtfs_dentry->d_dentry = child_dentry;
   strcpy(vtfs_dentry->d_name, child_dentry->d_name.name);
   vtfs_dentry->d_parent_ino = parent_inode->i_ino;
-  vtfs_dentry->d_inode = vtfs_inode;
-  vtfs_dentry->d_inode->i_ino = inode->i_ino;
-  vtfs_dentry->d_inode->i_mode = inode->i_mode;
-  vtfs_dentry->d_inode->i_size = 0;
 
   list_add(&vtfs_dentry->d_list, &vtfs_sb.s_dentries);
   d_add(child_dentry, inode);
@@ -119,24 +153,45 @@ int vtfs_unlink(
 ) {
   struct vtfs_dentry *dentry;
   ino_t root;
+  char root_str[INT_LEN];
   const char *name;
+  char name_enc[MAX_DENTRY_NAME_BYTE];
+  int64_t code;
+  struct unlink_response response;
 
   root = parent_inode->i_ino;
   name = child_dentry->d_name.name;
 
+  encode(name, name_enc);
+  snprintf(root_str, sizeof(root_str), "%u", (uint) root);
+
+  code = vtfs_http_call(
+    "TODO",
+    "remove",
+    (void *)(&response),
+    sizeof(response),
+    2,
+    "name",
+    name_enc,
+    "parent_inode",
+    root_str
+  );
+
+  if (code != 0) {
+    printk(KERN_ERR "Unlink HTTP-call error code %lld\n", code);
+    return -code;
+  }
+
   list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
     if (dentry->d_parent_ino == root && strcmp(dentry->d_name, name) == 0) {
       drop_nlink(child_dentry->d_inode);
-      if (child_dentry->d_inode->i_nlink == 0) {
-        kfree(dentry->d_inode);
-      }
       list_del(&dentry->d_list);
       kfree(dentry);
       d_drop(child_dentry);
-      return 0;
+      break;
     }
   }
-  return -ENOENT;
+  return 0;
 }
 
 int vtfs_mkdir(
@@ -146,11 +201,49 @@ int vtfs_mkdir(
 ) {
   struct inode *inode;
   struct vtfs_dentry *vtfs_dentry;
-  struct vtfs_inode *vtfs_inode;
+  ino_t root;
+  char root_str[INT_LEN];
+  const char *name;
+  char name_enc[MAX_DENTRY_NAME_BYTE];
+  char mode_str[INT_LEN];
+  int64_t code;
+  struct create_response response;
+
+  name = child_dentry->d_name.name;
+  root = parent_inode->i_ino;
+  mode |= S_IFDIR;
+  mode |= S_IRWXUGO;
+
+  encode(name, name_enc);
+  snprintf(root_str, sizeof(root_str), "%u", (uint) root);
+  snprintf(mode_str, sizeof(mode_str), "%u", (uint) mode);
+
+  code = vtfs_http_call(
+    "TODO",
+    "create",
+    (void *)(&response),
+    sizeof(response),
+    3,
+    "name",
+    name_enc,
+    "parent_inode",
+    root_str,
+    "mode",
+    mode_str
+  );
+  if (code != 0) {
+    printk(KERN_ERR "Mkdir HTTP-call error code %lld\n", code);
+    return -code;
+  }
   
-  inode = vtfs_get_inode(parent_inode->i_sb, parent_inode, mode | S_IFDIR, next_ino++);
+  inode = vtfs_get_inode(parent_inode->i_sb, parent_inode, mode, response.inode);
   if (!inode) {
     return -ENOMEM;
+  }
+
+  if (parent_inode->i_ino == inode->i_ino) {
+    iput(inode);
+    return -EFAULT;
   }
 
   vtfs_dentry = kmalloc(sizeof(struct vtfs_dentry), GFP_KERNEL);
@@ -159,28 +252,9 @@ int vtfs_mkdir(
     return -ENOMEM;
   }
 
-  vtfs_inode = kmalloc(sizeof(struct vtfs_inode), GFP_KERNEL);
-  if (!vtfs_inode) {
-    kfree(vtfs_dentry);
-    iput(inode);
-    return -ENOMEM;
-  }
-
-  vtfs_inode->i_ino = inode->i_ino;
-  vtfs_inode->i_mode = inode->i_mode;
-  vtfs_inode->i_size = 0;
-
   vtfs_dentry->d_dentry = child_dentry;
   strcpy(vtfs_dentry->d_name, child_dentry->d_name.name);
   vtfs_dentry->d_parent_ino = parent_inode->i_ino;
-  vtfs_dentry->d_inode = vtfs_inode;
-
-  if (vtfs_dentry->d_parent_ino == vtfs_dentry->d_inode->i_ino) {
-    kfree(vtfs_inode);
-    kfree(vtfs_dentry);
-    iput(inode);
-    return -EFAULT;
-  }
 
   list_add(&vtfs_dentry->d_list, &vtfs_sb.s_dentries);
   d_add(child_dentry, inode);
@@ -195,30 +269,46 @@ int vtfs_rmdir(
 ) {
   struct vtfs_dentry *dentry;
   ino_t root;
+  char root_str[INT_LEN];
   const char *name;
-
-  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
-    if (dentry->d_parent_ino == child_dentry->d_inode->i_ino) {
-      return -ENOTEMPTY;
-    }
-  }
+  char name_enc[MAX_DENTRY_NAME_BYTE];
+  int64_t code;
+  struct lookup_response response;
 
   root = parent_inode->i_ino;
   name = child_dentry->d_name.name;
 
+  encode(name, name_enc);
+  snprintf(root_str, sizeof(root_str), "%u", (uint) root);
+
+  code = vtfs_http_call(
+    "TODO",
+    "remove",
+    (void *)(&response),
+    sizeof(response),
+    2,
+    "name",
+    name_enc,
+    "parent_inode",
+    root_str
+  );
+
+  if (code != 0) {
+    printk(KERN_ERR "Rmdir HTTP-call error code %lld\n", code);
+    return -code;
+  }
+
   list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
     if (dentry->d_parent_ino == root && strcmp(dentry->d_name, name) == 0) {
       list_del(&dentry->d_list);
-      kfree(dentry->d_inode);
       kfree(dentry);
       drop_nlink(child_dentry->d_inode);
       drop_nlink(parent_inode);
       d_drop(child_dentry);
-      return 0;
+      break;
     }
   }
-
-  return -ENOENT;
+  return 0;
 }
 
 struct inode_operations vtfs_inode_ops = {
@@ -235,9 +325,12 @@ int vtfs_iterate(
   struct file* file,
   struct dir_context* ctx
 ) {
-  struct vtfs_dentry *dentry;
   struct inode *cur_dir_inode;
   unsigned type;
+  char root_str[INT_LEN];
+  int64_t code;
+  struct iterate_response response;
+  int i;
 
   if (file == NULL || ctx == NULL) {
     return -EINVAL;
@@ -251,22 +344,39 @@ int vtfs_iterate(
 
   cur_dir_inode = file->f_path.dentry->d_inode;
 
-  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
-    if (dentry->d_parent_ino == cur_dir_inode->i_ino) {
-      if (S_ISDIR(dentry->d_inode->i_mode)) {
-        type = DT_DIR;
-      } else if (S_ISREG(dentry->d_inode->i_mode)) {
-        type = DT_REG;
-      } else {
-        type = DT_UNKNOWN;
-      }
-      if (!dir_emit(ctx, dentry->d_name, strlen(dentry->d_name), dentry->d_inode->i_ino, type)) {
-        return -ENOMEM;
-      }
-      ctx->pos++;
-    }
+  snprintf(root_str, sizeof(root_str), "%u", (uint) cur_dir_inode->i_ino);
+
+  code = vtfs_http_call(
+    "TODO",
+    "iterate",
+    (void *)(&response),
+    sizeof(response),
+    1,
+    "parent_inode",
+    root_str
+  );
+  if (code != 0) {
+    printk(KERN_ERR "Iterate error code %lld\n", code);
+    return -code;
   }
-  return ctx->pos;
+
+  for (i = 0; i < response.count; i++) {
+    if (S_ISDIR(response.dentries[i].mode)) {
+      type = DT_DIR;
+    } else if (S_ISREG(response.dentries[i].mode)) {
+      type = DT_REG;
+    } else {
+      type = DT_UNKNOWN;
+    }
+    printk(KERN_INFO "Mode: %d\n", response.dentries[i].mode);
+    printk(KERN_INFO "Type: %d\n", type);
+    if (!dir_emit(ctx, response.dentries[i].name, strlen(response.dentries[i].name), response.dentries[i].inode, response.dentries[i].mode | S_IRWXUGO)) {
+      return -ENOMEM;
+    }
+    ctx->pos++;
+  }
+
+  return (int)(ctx->pos - file->f_pos);
 }
 
 ssize_t vtfs_read(
@@ -275,33 +385,47 @@ ssize_t vtfs_read(
   size_t len,
   loff_t *offset
 ) {
-  struct vtfs_dentry *dentry;
   struct inode *file_inode;
   size_t max_len;
+  char inode_str[INT_LEN];
+  int64_t code;
+  struct read_response response;
 
   if (!file || !buffer || !offset || *offset < 0) {
     return -EINVAL;
   }
 
   file_inode = file->f_path.dentry->d_inode;
+  snprintf(inode_str, sizeof(inode_str), "%u", (uint) file_inode->i_ino);
 
-  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
-    if (dentry->d_inode->i_ino == file_inode->i_ino) {
-      if (*offset >= dentry->d_inode->i_size){
-        return 0;
-      }
-      max_len = dentry->d_inode->i_size - *offset;
-      if (len > max_len) {
-        len = max_len;
-      }
-      if (copy_to_user(buffer, dentry->d_inode->i_data + *offset, len) != 0) {
-        return -EFAULT;
-      }
-      *offset += len;
-      return len;
-    }
+  code = vtfs_http_call(
+    "TODO",
+    "read",
+    (void *)(&response),
+    sizeof(response),
+    1,
+    "inode",
+    inode_str
+  );
+  if (code != 0) {
+    printk(KERN_ERR "Read error code %lld\n", code);
+    return -code;
   }
-  return -ENOENT;
+  pr_info("vtfs_read: buffer size = %zu, requested size = %zu\n", response.size, len);
+
+  if (*offset >= response.size){
+    return 0;
+  }
+  max_len = response.size - *offset;
+  if (len > max_len) {
+    len = max_len;
+  }
+  pr_info("vtfs_read: buffer size = %zu, requested size = %zu\n", response.size, len);
+  if (copy_to_user(buffer, response.data + *offset, len) != 0) {
+    return -EFAULT;
+  }
+  *offset += len;
+  return len;
 }
 
 ssize_t vtfs_write(
@@ -310,40 +434,61 @@ ssize_t vtfs_write(
   size_t len,
   loff_t *offset
 ) {
-  struct vtfs_dentry *dentry;
   struct inode *file_inode;
   size_t max_len;
+  char inode_str[INT_LEN];
+  char data[MAX_FILE_SIZE];
+  char data_enc[MAX_DENTRY_NAME_BYTE];
+  char offset_str[INT_LEN];
+  int64_t code;
+  struct write_response response;
 
   if (!file || !buffer || !offset || *offset < 0) {
     return -EINVAL;
   }
+  if (*offset >= MAX_FILE_SIZE) {
+    return -ENOSPC;
+  }
+
+  pr_info("vtfs_write: offset = %zu, len = %zu\n", *offset, len);
 
   file_inode = file->f_path.dentry->d_inode;
+  snprintf(inode_str, sizeof(inode_str), "%u", (uint) file_inode->i_ino);
 
-  list_for_each_entry(dentry, &vtfs_sb.s_dentries, d_list) {
-    if (dentry->d_inode->i_ino == file_inode->i_ino) {
-      if (*offset >= MAX_FILE_SIZE) {
-        return -ENOSPC;
-      }
-      if (*offset == 0) {
-        dentry->d_inode->i_size = 0;
-        memset(dentry->d_inode->i_data, 0, MAX_FILE_SIZE);
-      }
-      max_len = MAX_FILE_SIZE - *offset;
-      if (len > max_len) {
-        len = max_len;
-      }
-      if (copy_from_user(dentry->d_inode->i_data + *offset, buffer, len) != 0) {
-        return -EFAULT;
-      }
-      *offset += len;
-      if (*offset > dentry->d_inode->i_size) {
-        dentry->d_inode->i_size = *offset;
-      }
-      return len;
-    }
+  max_len = MAX_FILE_SIZE - *offset;
+  if (len > max_len) {
+    len = max_len;
   }
-  return -ENOENT;
+  if (copy_from_user(data, buffer, len) != 0) {
+    return -EFAULT;
+  }
+  data[len] = 0;
+  encode(data, data_enc);
+
+  snprintf(offset_str, sizeof(offset_str), "%d", (int) *offset);
+
+  pr_info("vtfs_write: offset = %zu, len = %zu\n", *offset, len);
+
+  code = vtfs_http_call(
+    "TODO",
+    "write",
+    (void *)(&response),
+    sizeof(response),
+    3,
+    "inode",
+    inode_str,
+    "data",
+    data_enc,
+    "offset",
+    offset_str
+  );
+  if (code != 0) {
+    printk(KERN_ERR "Write error code %lld\n", code);
+    return -code;
+  }
+
+  *offset += len;
+  return len;
 }
 
 struct file_operations vtfs_dir_ops = {
